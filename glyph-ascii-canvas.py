@@ -11,6 +11,7 @@ def generate_ascii_art(
     threshold=None,
     font_path=None,
     ascii_chars="".join(chr(i) for i in range(32, 127)),
+    linewidth=0
 ):
     # Load font
     default_fonts = [
@@ -53,9 +54,11 @@ def generate_ascii_art(
         char_draw = ImageDraw.Draw(char_img)
 
         try:
-            char_draw.text((0, 0), c, fill=0, font=font)
+            char_draw.text((0, 0), c, fill=0, font=font,
+                           stroke_width=linewidth, stroke_fill=0)
         except:
-            char_draw.text((0, 0), c, fill=0)
+            char_draw.text((0, 0), c, fill=0,
+                           stroke_width=linewidth, stroke_fill=0)
 
         # Crop character boundaries
         bbox = char_img.getbbox()
@@ -76,7 +79,8 @@ def generate_ascii_art(
 
     # Calculate new dimensions (multiples of block size)
     new_width = ((width + block_size - 1) // block_size) * block_size
-    new_height = ((height + 2 * block_size - 1) // (2 * block_size)) * (2 * block_size)
+    new_height = ((height + 2 * block_size - 1) //
+                  (2 * block_size)) * (2 * block_size)
 
     # Create new image and paste original
     new_img = Image.new("L", (new_width, new_height), 255)
@@ -92,7 +96,8 @@ def generate_ascii_art(
         row = []
         for i in range(grid_width):
             # Create 6n x 3n block
-            big_block = np.full((6 * block_size, 3 * block_size), 255, dtype=np.uint8)
+            big_block = np.full(
+                (6 * block_size, 3 * block_size), 255, dtype=np.uint8)
 
             # Fill 3x3 grid
             for y_offset in range(-1, 2):
@@ -104,15 +109,15 @@ def generate_ascii_art(
                         x_start = grid_x * block_size
                         y_start = grid_y * 2 * block_size
                         block = img_array[
-                            y_start : y_start + 2 * block_size,
-                            x_start : x_start + block_size,
+                            y_start: y_start + 2 * block_size,
+                            x_start: x_start + block_size,
                         ]
 
                         dest_x = (x_offset + 1) * block_size
                         dest_y = (y_offset + 1) * 2 * block_size
                         big_block[
-                            dest_y : dest_y + 2 * block_size,
-                            dest_x : dest_x + block_size,
+                            dest_y: dest_y + 2 * block_size,
+                            dest_x: dest_x + block_size,
                         ] = block
 
             # Find best matching character
@@ -120,7 +125,8 @@ def generate_ascii_art(
             best_score = float("inf")
 
             for char, template in char_templates.items():
-                mse = np.mean((big_block.astype(float) - template.astype(float)) ** 2)
+                mse = np.mean((big_block.astype(float) -
+                              template.astype(float)) ** 2)
                 if mse < best_score:
                     best_score = mse
                     best_char = char
@@ -132,7 +138,8 @@ def generate_ascii_art(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate ASCII art from images")
+    parser = argparse.ArgumentParser(
+        description="Generate ASCII art from images")
     parser.add_argument("image", help="Path to input image")
     parser.add_argument(
         "-s", "--size", type=int, default=10, help="Block size (default: 10)"
@@ -147,6 +154,9 @@ if __name__ == "__main__":
         default="".join(chr(i) for i in range(32, 127)),
         help="Custom ASCII character set",
     )
+    parser.add_argument(
+        "-l", "--linewidth", type=int, default=0, help="Font stroke width"
+    )
 
     args = parser.parse_args()
 
@@ -157,6 +167,7 @@ if __name__ == "__main__":
             threshold=args.threshold,
             font_path=args.font,
             ascii_chars=args.chars,
+            linewidth=args.linewidth
         )
         for line in art:
             print(line)
