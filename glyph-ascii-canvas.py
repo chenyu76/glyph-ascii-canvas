@@ -47,23 +47,9 @@ def load_font(font_path, size):
     return font
 
 
-def generate_ascii_art(
-    image_path,
-    block_size,
-    threshold=None,
-    font_path=None,
-    ascii_chars="".join(chr(i) for i in range(32, 127)),
-    linewidth=0,
-    char_scale=1.0,
-    char_ratio=2
+def generate_chars_template_stack(
+    font, ascii_chars, step_x, step_y, linewidth
 ):
-    step_x = block_size
-    step_y = int(block_size * char_ratio)
-
-    font_size = int(block_size * char_scale)
-
-    font = load_font(font_path, font_size)
-
     char_sizes = []
     for c in ascii_chars:
         bbox = font.getbbox(c)  # left, top, right, bottom
@@ -75,6 +61,7 @@ def generate_ascii_art(
     max_w = max(s[0] for s in char_sizes) if char_sizes else step_x
     max_h = max(s[1] for s in char_sizes) if char_sizes else step_y
 
+    # each character window size
     # make sure window size is even
     win_w = max_w + (max_w % 2)
     win_h = max_h + (max_h % 2)
@@ -96,11 +83,60 @@ def generate_ascii_art(
     # size (N_chars, win_h, win_w)
     templates_stack = np.array(templates, dtype=np.float32)
 
-    # padding
+    return templates_stack, win_w, win_h
+
+
+# Main function to generate ASCII art
+def generate_ascii_art(
+    image_path,
+    width,
+    threshold=None,
+    font_path=None,
+    ascii_chars="".join(chr(i) for i in range(32, 127)),
+    linewidth=0,
+    char_scale=1.0,
+    char_ratio=2
+):
     img = Image.open(image_path).convert("L")
     if threshold is not None:
         img = img.point(lambda p: 255 if p > threshold else 0)
 
+    block_size = img.width // width
+
+    font_size = int(block_size * char_scale)
+    font = load_font(font_path, font_size)
+
+    step_x = block_size
+    step_y = int(block_size * char_ratio)
+
+    templates_stack, win_w, win_h = generate_chars_template_stack(
+        font, ascii_chars, step_x, step_y, linewidth
+    )
+
+    _, ascii_art = image2ascii(
+        img,
+        templates_stack,
+        ascii_chars,
+        step_x,
+        step_y,
+        win_w,
+        win_h,
+    )
+    return ascii_art
+
+
+# Convert image to ASCII art using sliding window and template matching
+def image2ascii(
+    img,
+    templates_stack,
+    ascii_chars,
+    step_x,
+    step_y,
+    win_w,
+    win_h,
+):
+
+    # padding
     img_w, img_h = img.size
     img_arr = np.array(img, dtype=np.float32)
 
@@ -156,12 +192,14 @@ def generate_ascii_art(
         best_score[mask] = mse[mask]
         result_indices[mask] = i
 
+    total_score = np.sum(best_score)
+
     ascii_art = []
     for r in range(n_rows):
         row_str = "".join(ascii_chars[idx] for idx in result_indices[r])
         ascii_art.append(row_str)
 
-    return ascii_art
+    return (total_score, ascii_art)
 
 
 if __name__ == "__main__":
@@ -198,7 +236,7 @@ if __name__ == "__main__":
 
     art = generate_ascii_art(
         args.image,
-        Image.open(args.image).width // args.width,
+        args.width,
         threshold=args.threshold,
         font_path=args.font,
         ascii_chars=args.chars,
