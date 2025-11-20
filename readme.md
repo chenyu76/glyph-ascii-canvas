@@ -163,7 +163,7 @@ Larger width give more detailed output.
 
 Original image : 
 
-![shapes](./example2.png)
+![shapes](./example/2.png)
 
 ```
 > python ./glyph-ascii-canvas.py -w 60 -s 2.5 -f ./MapleMonoNL-Regular.ttf ./example/2.png
