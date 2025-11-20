@@ -3,16 +3,10 @@ import sys
 import argparse
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
+from numpy.lib.stride_tricks import as_strided
 
 
-def generate_ascii_art(
-    image_path,
-    block_size,
-    threshold=None,
-    font_path=None,
-    ascii_chars="".join(chr(i) for i in range(32, 127)),
-    linewidth=0
-):
+def load_font(font_path, size):
     # Load font
     default_fonts = [
         "arial.ttf",
@@ -25,114 +19,147 @@ def generate_ascii_art(
     ]
     font = None
 
-    if font_path and os.path.exists(font_path):
+    if (font_path is not None):
         try:
-            font = ImageFont.truetype(font_path, 2 * block_size)
-        except:
-            pass
+            font = ImageFont.truetype(font_path, size)
+        except Exception as e:
+            if not os.path.exists(font_path):
+                print("Font path does not exist.")
+            print(f"Failed to load font from {font_path}. {e}")
+            print("trying default fonts...")
 
     if font is None:
         for f in default_fonts:
             try:
-                font = ImageFont.truetype(f, 2 * block_size)
+                font = ImageFont.truetype(f, size)
                 break
-            except:
+            except Exception:
                 continue
 
     if font is None:
+        print("Falling back to default PIL font...")
         try:
-            font = ImageFont.load_default()
-        except:
-            print("Failed to load any fonts. Please specify a valid font path.")
+            font = ImageFont.load_default(size)
+        except Exception as e:
+            print(f"Failed to load any fonts. {e}")
             sys.exit(1)
 
-    # Create ASCII character templates (6n x 3n)
-    char_templates = {}
+    return font
+
+
+def generate_ascii_art(
+    image_path,
+    block_size,
+    threshold=None,
+    font_path=None,
+    ascii_chars="".join(chr(i) for i in range(32, 127)),
+    linewidth=0,
+    char_scale=1.0,
+    char_ratio=2
+):
+    step_x = block_size
+    step_y = int(block_size * char_ratio)
+
+    font_size = int(block_size * char_scale)
+
+    font = load_font(font_path, font_size)
+
+    char_sizes = []
     for c in ascii_chars:
-        template_img = Image.new("L", (3 * block_size, 6 * block_size), 255)
-        char_img = Image.new("L", (3 * block_size, 6 * block_size), 255)
-        char_draw = ImageDraw.Draw(char_img)
+        bbox = font.getbbox(c)  # left, top, right, bottom
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        char_sizes.append((w, h))
 
-        try:
-            char_draw.text((0, 0), c, fill=0, font=font,
-                           stroke_width=linewidth, stroke_fill=0)
-        except:
-            char_draw.text((0, 0), c, fill=0,
-                           stroke_width=linewidth, stroke_fill=0)
+    # choose max size
+    max_w = max(s[0] for s in char_sizes) if char_sizes else step_x
+    max_h = max(s[1] for s in char_sizes) if char_sizes else step_y
 
-        # Crop character boundaries
-        bbox = char_img.getbbox()
-        if bbox:
-            char_img = char_img.crop(bbox)
+    # make sure window size is even
+    win_w = max_w + (max_w % 2)
+    win_h = max_h + (max_h % 2)
 
-        template_img.paste(char_img, (0, 0))
-        char_templates[c] = np.array(template_img)
+    templates = []
+    for c in ascii_chars:
+        img_t = Image.new("L", (win_w, win_h), 255)
+        draw = ImageDraw.Draw(img_t)
 
-    # Load and process image
+        bbox = draw.textbbox((0, 0), c, font=font)
+        cw = bbox[2] - bbox[0]
+        ch = bbox[3] - bbox[1]
+
+        # draw text centered
+        draw.text(((win_w - cw) / 2, (win_h - ch) / 2), c,
+                  fill=0, font=font, stroke_width=linewidth)
+        templates.append(np.array(img_t))
+
+    # size (N_chars, win_h, win_w)
+    templates_stack = np.array(templates, dtype=np.float32)
+
+    # padding
     img = Image.open(image_path).convert("L")
-
-    # Apply thresholding if specified
     if threshold is not None:
         img = img.point(lambda p: 255 if p > threshold else 0)
 
-    width, height = img.size
+    img_w, img_h = img.size
+    img_arr = np.array(img, dtype=np.float32)
 
-    # Calculate new dimensions (multiples of block size)
-    new_width = ((width + block_size - 1) // block_size) * block_size
-    new_height = ((height + 2 * block_size - 1) //
-                  (2 * block_size)) * (2 * block_size)
+    n_cols = (img_w + step_x - 1) // step_x
+    n_rows = (img_h + step_y - 1) // step_y
 
-    # Create new image and paste original
-    new_img = Image.new("L", (new_width, new_height), 255)
-    new_img.paste(img, (0, 0))
-    img_array = np.array(new_img)
+    target_h = n_rows * step_y
+    target_w = n_cols * step_x
 
-    # Generate ASCII art
+    pad_top = win_h // 2 - step_y // 2
+    pad_left = win_w // 2 - step_x // 2
+    paste_y = pad_top if pad_top > 0 else 0
+    paste_x = pad_left if pad_left > 0 else 0
+
+    canvas_h = target_h + win_h
+    canvas_w = target_w + win_w
+
+    canvas = np.full((canvas_h, canvas_w), 255, dtype=np.float32)
+
+    # protect against overflow
+    h_end = min(paste_y + img_h, canvas_h)
+    w_end = min(paste_x + img_w, canvas_w)
+    canvas[paste_y:h_end, paste_x:w_end] = img_arr[:h_end-paste_y, :w_end-paste_x]
+
+    # Sliding Window View
+    # Exstract sliding windows from canvas
+    # (n_rows, n_cols) of size of (win_h, win_w)
+    shape = (n_rows, n_cols, win_h, win_w)
+    strides = (
+        step_y * canvas.strides[0],
+        step_x * canvas.strides[1],
+        canvas.strides[0],
+        canvas.strides[1]
+    )
+
+    # windows size: (n_rows, n_cols, win_h, win_w)
+    windows = as_strided(canvas, shape=shape, strides=strides)
+    # windows_flat: (n_rows, n_cols, win_h*win_w)
+    windows_flat = windows.reshape(n_rows, n_cols, -1)
+    # templates_flat: (n_chars, win_h*win_w)
+    templates_flat = templates_stack.reshape(len(ascii_chars), -1)
+
+    result_indices = np.zeros((n_rows, n_cols), dtype=int)
+    best_score = np.full((n_rows, n_cols), float('inf'))
+    for i, tmpl in enumerate(templates_flat):
+        # tmpl: (pixels,)
+        # windows_flat: (rows, cols, pixels)
+        # calculate MSE
+        diff = windows_flat - tmpl
+        mse = np.mean(diff ** 2, axis=2)
+
+        mask = mse < best_score
+        best_score[mask] = mse[mask]
+        result_indices[mask] = i
+
     ascii_art = []
-    grid_width = new_width // block_size
-    grid_height = new_height // (2 * block_size)
-
-    for j in range(grid_height):
-        row = []
-        for i in range(grid_width):
-            # Create 6n x 3n block
-            big_block = np.full(
-                (6 * block_size, 3 * block_size), 255, dtype=np.uint8)
-
-            # Fill 3x3 grid
-            for y_offset in range(-1, 2):
-                for x_offset in range(-1, 2):
-                    grid_y = j + y_offset
-                    grid_x = i + x_offset
-
-                    if 0 <= grid_x < grid_width and 0 <= grid_y < grid_height:
-                        x_start = grid_x * block_size
-                        y_start = grid_y * 2 * block_size
-                        block = img_array[
-                            y_start: y_start + 2 * block_size,
-                            x_start: x_start + block_size,
-                        ]
-
-                        dest_x = (x_offset + 1) * block_size
-                        dest_y = (y_offset + 1) * 2 * block_size
-                        big_block[
-                            dest_y: dest_y + 2 * block_size,
-                            dest_x: dest_x + block_size,
-                        ] = block
-
-            # Find best matching character
-            best_char = None
-            best_score = float("inf")
-
-            for char, template in char_templates.items():
-                mse = np.mean((big_block.astype(float) -
-                              template.astype(float)) ** 2)
-                if mse < best_score:
-                    best_score = mse
-                    best_char = char
-
-            row.append(best_char or " ")
-        ascii_art.append("".join(row))
+    for r in range(n_rows):
+        row_str = "".join(ascii_chars[idx] for idx in result_indices[r])
+        ascii_art.append(row_str)
 
     return ascii_art
 
@@ -142,7 +169,8 @@ if __name__ == "__main__":
         description="Generate ASCII art from images")
     parser.add_argument("image", help="Path to input image")
     parser.add_argument(
-        "-s", "--size", type=int, default=10, help="Block size (default: 10)"
+        "-w", "--width", type=int, default=80,
+        help="Target output character number in width"
     )
     parser.add_argument(
         "-t", "--threshold", type=int, help="Binarization threshold (0-255)"
@@ -157,20 +185,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "-l", "--linewidth", type=int, default=0, help="Font stroke width"
     )
+    parser.add_argument(
+        "-r", "--char-ratio", type=float, default=2.0,
+        help="Character height to width ratio"
+    )
+    parser.add_argument(
+        "-s", "--char-scale", type=float, default=1.0,
+        help="Character scaling factor"
+    )
 
     args = parser.parse_args()
 
-    try:
-        art = generate_ascii_art(
-            args.image,
-            args.size,
-            threshold=args.threshold,
-            font_path=args.font,
-            ascii_chars=args.chars,
-            linewidth=args.linewidth
-        )
-        for line in art:
-            print(line)
-    except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+    art = generate_ascii_art(
+        args.image,
+        Image.open(args.image).width // args.width,
+        threshold=args.threshold,
+        font_path=args.font,
+        ascii_chars=args.chars,
+        linewidth=args.linewidth,
+        char_scale=args.char_scale,
+        char_ratio=args.char_ratio
+    )
+    for line in art:
+        print(line)
