@@ -307,7 +307,8 @@ if __name__ == "__main__":
         help="Target output character number in width"
     )
     parser.add_argument(
-        "-t", "--threshold", type=int, help="Binarization threshold (0-255)"
+        "-t", "--threshold", type=int,
+        help="Binarization threshold (0-255). Unset for no binarization"
     )
     parser.add_argument("-f", "--font", help="Path to custom font file")
     parser.add_argument(
@@ -337,7 +338,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-a", "--auto", action='store_true',
-        help="Try automatic parameter tuning for better quality"
+        help="Try automatic parameter (-l, -s, -x, -y) tuning for better quality"
     )
 
     args = parser.parse_args()

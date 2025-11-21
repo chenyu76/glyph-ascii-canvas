@@ -8,54 +8,106 @@ This method typically produces better results for line drawings and structural i
 
 ```bash
 python glyph-ascii-canvas.py [IMAGE_PATH] [OPTIONS]
-````
+```
 
-NOTE: Currently, the image need to have a white background. I am to lazy to add an "invert" option in the script.
+NOTE: Currently, the image need to have a white background. I am too lazy to add an "invert" option in the script.
+
+
 
 ### Options
 
-| Option | Long Option | Description | Default |
-| :--- | :--- | :--- | :--- |
-| `-w` | `--width` | Target output width (number of characters). Controls resolution. | `80` |
-| `-r` | `--char-ratio` | Character height to width ratio. | `2.0` |
-| `-s` | `--char-scale` | Font size scaling factor relative to the block size. | `1.0` |
-| `-l` | `--linewidth` | Stroke linewidth used for generating character templates. | `0` |
-| `-t` | `--threshold` | Binarization threshold (0-255). If unset, uses grayscale. | `None` |
-| `-f` | `--font` | Path to a custom `.ttf` font file. | System default |
-| `-c` | `--chars` | Custom ASCII character set to use for matching. | ASCII (32-126) |
+| **Option** | **Long Option** | **Description**                                              | **Default**    |
+| ---------- | --------------- | ------------------------------------------------------------ | -------------- |
+| `-w`       | `--width`       | Target output width (number of characters). Controls resolution. | `80`           |
+| `-r`       | `--char-ratio`  | Character height to width ratio.                             | `2.0`          |
+| `-s`       | `--char-scale`  | Font size scaling factor relative to the block size.         | `1.0`          |
+| `-l`       | `--linewidth`   | Stroke linewidth used for generating character templates.    | `0`            |
+| `-t`       | `--threshold`   | Binarization threshold (0-255). If unset, uses grayscale.    | `None`         |
+| `-f`       | `--font`        | Path to a custom `.ttf` font file.                           | System default |
+| `-c`       | `--chars`       | Custom ASCII character set to use for matching.              | ASCII (32-126) |
+| `-x`       | `--shift-x`     | Shift image position in X direction (pixels) for grid alignment. | `0`            |
+| `-y`       | `--shift-y`     | Shift image position in Y direction (pixels) for grid alignment. | `0`            |
+| `-a`       | `--auto`        | **Auto Mode**: Try automatic parameter tuning (linewidth, scale, shift) for better quality. | `False`        |
+
+NOTE: Option `-a` will cause the script to take longer to complete. On my laptop (AMD Ryzen 7 6800HS), the time taken for a 60-characters wide image is as follows (statistics using the time command).
+
+```
+________________________________________________________
+Executed in    3.06 secs    fish           external
+   usr time   13.77 secs    0.00 micros   13.77 secs
+   sys time    1.40 secs  947.00 micros    1.40 secs
+```
+
+
 
 ## How It Works
 
 The algorithm follows these steps to generate the ASCII output:
 
-1.  Dynamic Template Generation:
-      * Calculates the precise block size based on the input image width and desired output `--width`.
-      * Loads the specified font and renders all candidate characters.
-      * Determines a unified window size based on the maximum bounding box of the rendered characters to ensure alignment.
+1. Dynamic Template Generation:
+   - Calculates the precise block size based on the input image width and desired output `--width`.
+   - Loads the specified font and renders all candidate characters.
+   - Determines a unified window size based on the maximum bounding box of the rendered characters.
+2. Canvas Creation & Positioning:
+   - Creates a white canvas larger than the target image to accommodate window margins.
+   - Pastes the input image (converted to grayscale/binary) onto the canvas.
+   - Applies Shift Offsets (`-x`, `-y`) here. This allows fine-tuning the alignment between the pixel grid and the character grid, which significantly reduces alignment artifacts in line drawings.
+3. Sliding Window Matching:
+   - Uses NumPy strides to create an efficient view of sliding windows over the canvas without duplicating memory.
+   - Calculates the Mean Squared Error (MSE) between every image window and every character template.
+   - Selects the character with the lowest error for each position.
+4. Automatic Tuning (Auto Mode):
+   - If `-a` is enabled, the script uses multi-threading to brute-force test combinations of:
+     - Linewidths: (0, 1, 2)
+     - Scales: (1.0 to 2.4)
+     - Shifts: Small pixel offsets in X/Y directions.
+   - It automatically selects the result with the lowest total MSE score.
 
-2.  Image Preprocessing & Padding:
-      * Converts the input image to grayscale (or applies thresholding).
-      * Pads the image borders intelligently to handle the sliding window at the edges without boundary errors.
 
-3.  Sliding Window Matching:
-      * Uses NumPy strides to create an efficient view of sliding windows over the image without duplicating memory.
-      * Each window corresponds to a grid position in the output text.
-      * Calculates the Mean Squared Error (MSE) between every image window and every character template.
-      * Selects the character with the lowest error for each position.
 
 ## Requirements
 
-  * Python 3.6+
-  * Pillow (PIL Fork)
-  * NumPy
+- Python 3.6+
+- Pillow (PIL Fork)
+- NumPy
 
-## Example
+## Examples
 
 The following examples use [Maple Mono](https://github.com/subframe7536/maple-font) font.
 
-![example](./example/1.svg)
+Original image (`./example/1.png`):
 
-Export above .svg file to `./example/1.png` with size of `1200x823`. (Pillow don't support .svg input)
+![reimu](./example/1.svg)
+
+Script output:
+
+```
+> python ./glyph-ascii-canvas.py -f ./MapleMonoNL-Regular.ttf ./example/1.png -w 60 -a
+                                                            
+       }^y+=----,,                      ,-=^^^^m+,          
+       ]  L           `^=       -+"`          /  }          
+        @                 `=.r`               /  [          
+        \  @             .-=+^^=-            ~   @          
+         @ +         ~"`          `^-        /              
+         ]  `      r                  \         ]           
+            `@   -`                     @       }^-         
+        r`\  @r"~                        8o-   /    @       
+     ~"   {^                    --       ]   `^      `=     
+  ."           M     c]         ` `@      L            `@   
+               }    d""l       / ""`L     ]             .}  
+   @          ]        ^}^     [""--=&    ]^,         ./    
+     @         . @  @}   ] `^- ]-/   /  },]  `-     ."      
+      `-     ~`$--& M    /      L   a -`       L  ./        
+        \  ." .[   @                 "^^]       `*          
+          9   [@    @,      ,-      [   { @                 
+             /.]      "-         ,r`@   }"d                 
+                `,        `""""`    j  /                    
+                  "=@               O"                      
+                                                            
+
+```
+
+You can note the different in lines by the using of different options. For example, changing `-s`.
 
 ```
 > python ./glyph-ascii-canvas.py -w 60 -s 2.5 -f ./MapleMonoNL-Regular.ttf ./example/1.png
@@ -68,7 +120,7 @@ Export above .svg file to `./example/1.png` with size of `1200x823`. (Pillow don
          ]  ]L    x'                  `5     t  /           
          -l ]L   /                      \    L  [`">        
       -c" ) x"` /                        \`"z~ {    `x      
-   -<'     `   ]      *         /^~       L   `       `x    
+   -<'     `   ]      * /^~       L   `       `x    
   c`           #     /]L       J[ -\      \             `~  
   \           ]`    /  `>      {    )     ]             c`  
    `>         ] a  Jw*cff3o-   }cj"""}  * ]`^<       -c`    
@@ -79,10 +131,9 @@ Export above .svg file to `./example/1.png` with size of `1200x823`. (Pillow don
              {^]L   [ `"z+--  --+^' \  x[ `                 
                  ^-JL               {-<`                    
                    '                `                       
-
 ```
 
-You can note the different in lines by the using of different args.
+Or change `-l`.
 
 ```
 > python ./glyph-ascii-canvas.py -w 60 -l 4 -f ./MapleMonoNL-Regular.ttf ./example/1.png
@@ -107,53 +158,52 @@ You can note the different in lines by the using of different args.
                  -         `````    <  /                    
                   `>L               \`                      
                                                             
-
 ```
 
 Larger width give more detailed output.
 
 ```
-> python ./glyph-ascii-canvas.py -w 120 -l 5 -s 1.5 -f ./MapleMonoNL-Regular.ttf ./example/1.png
+> python ./glyph-ascii-canvas.py -f ./MapleMonoNL-Regular.ttf ./example/1.png -w 120 -a
                                                                                                                         
-               .                                                                                                        
-               b--~~--,.                                                            .,--~~~~~~~--,                      
-               L   \.    ```````````'ao=~-,.                             .,--~s'````          /    L                    
-               \    `                       ``'~,                 ,-<'```                   .j     b                    
-               `     \.                          `'-.        .-<``                          `>    /                     
-                L     \                              '-   ,<6                               ,(    /                     
-                ]     L                                `=`                                  (     /                     
-                 L    )                               ..,-----,.                           ,`     /                     
-                 ]   .(                        ,-~a```          ``>-.                      \,     \                     
-                  L  `>,                   ,<6`                      `'-.                 ,4     .b                     
-                  `    ]                .<`                              `>,              (      /                      
-                   L    ``-            <`                                   `-           <       (                      
-                   ]     /           <`                                       `-          \     .b                      
-                    L    `h        ./                                           L        <`     /`>-,                   
-                   .)    <`       <`                                             \       `L    ,`    `>                 
-                .-6` L   `> ,-s' <`                                               \>-.    `    (       `>               
-              -d`    \   -}`    /                                                  L  ``a-.   /          `-             
-           -a`       \,'`      <                                 ..                \       `>,(            `-           
-        ,<`                    /            ,>                  .(`'-               >                        `>         
-      ~`                      ^(           < ]                  /    `-             ]                          `>       
-    -`                        [\          /  `,                <       h.            L                           `> .   
-   /                         <[b         /`==a\.               ( ~ua'`` `            \                            -6    
-    `,                       /          /      `>             /          `.          ]                          -`      
-     `L                      (         .b     >~~}@,          / aaao     .]          ]`-                      -`        
-       `>.                   }  <-     /,----~a''`'[`-.        L<'"(`````  L     >   /  `>,                 -`          
-         `>                  ] <8`>    /( .]       /   `>,     )L  /       L    /`,  /     L,             -`            
-           `-                .L/  `>    [(         /      ``a~,/(``       /    <` ]><       `>          ~`              
-             `-            ,6 ][    \,  [L         (            \       .<`  ./  ,  (         \       -`                
-               h.        ,/   |(`````['~/8\-.  .,<`              `>---<'`(,-'`   / /           `>   ,/                  
-                `>      <`   .[       >                                   ]`o=~=>( /             `><`                   
-                  \.  ,/     /(        L                                 /       ( `.                                   
-                   `y;`     / \         L                               /        L  \                                   
-                           <8 `.        ]  >            ```             \       <.   >                                  
-                          .(   \        /   `>.                     .<6 L       / `'~/,                                 
-                          /-a   L      .b      `'~,.            .-<`     >     <                                        
-                                 L.    /            ```'avaa'```         \    <`                                        
-                                  `>   /                                <   ,4                                          
-                                    `>- L                               (-s`                                            
-                                       ``                                                                               
+                                                                                                                        
+               } ,--,.                                                                 .,------,.                       
+               [   Q   ``"""""""99ypw>=--.                                  ,-~<m^""``        :`   &                    
+               $    {.                     `"V@-                   .-<y""``                  d     }                    
+               '@    $                           "@-           -g"`                         '@     [                    
+                $     }                             `b,    ,g"                               /     L                    
+                {.    }                                \-d`                                 {     ]                     
+                 Q    {                                   ,,,.                              $     ]                     
+                 {.   $                         .-=pP"```      `"k>,                       $      $                     
+                  $   L.                    -a"`                    `"@-                   <"     }                     
+                  '@   {                 ,F`                            `\>               $      dL                     
+                   $    "h=            ~}                                  `\=            }      {                      
+                   {     :}          .4                                       {-          \=     }                      
+                    L    "?         ~}                                          b         $     db=-                    
+                    {     }       .P                                             Q        L     }    \>                 
+                 .c" L   `L  ,~sp.}                                               $>,     {    j       `@               
+               <"    }    }F`   :}                                                 L ``V@-    .}         {-             
+            ~P`      { <"       }                                                  {      `\>./            \-           
+         ~F`                   ]             c                   $`b,               L                        {>         
+      .d`                     :/           .}{                  ]    {=             {                          {>       
+     4`                       $$          :}  L                .}      b             Q                           {@     
+   .}                         [}         :[===}>               $ ,==umy^{.           {                             d`   
+    {-                       ]          :}     `@              [         {.          {                          .d`     
+     `b                      {          }     =--}@.           L~=oo      {.         ]&-                      .d`       
+       `@                    {  .-      [.-,,-=smpm}\-         $-<pH"""""``$     >   ]  `@                  .d`         
+         `@                  {  } L     $  ]       ]  `\=.     {[  ]       }    .}@  ]    `b.             .d`           
+           {=                 Q/  `@    }}`        ]      `"@-. }""       .[   .} `@-}      `L          .4`             
+             \-             c"`}    \.  $$         j           `$        ,}   c"  } }         $       .4`               
+               b          g"  /}""""`}b-][Q,     ,4              {=,,,-<$} .<"   ]  [          {@    d`                 
+                `@      .$    }       L     ````                         `]}>---={  L            Y=-}                   
+                  \.   d`    /$        b                                 d`      {  L                                   
+                   `@<}     :`{         L                               .}       $  $                                   
+                            } '@        {  @            ^P""            $        }   L                                  
+                           j   {        /   {=                       ,d $       ]`"@-`@                                 
+                          ].~r  L       }     `"@=.              .~p"    L      }                                       
+                                 b      L          ``"^p>==smyP"`        }     }                                        
+                                  `@    L                                }   c"                                         
+                                    `@, $                               j ~F`                                           
+                                       `"                               `                                               
                                                                                                                         
                                                                                                                         
 
@@ -161,7 +211,7 @@ Larger width give more detailed output.
 
 ### Other examples:
 
-Original image : 
+#### 2
 
 ![shapes](./example/2.png)
 
@@ -190,102 +240,107 @@ Original image :
                                                                
                                                                
                                                                
+```
+
+#### 3
+
+![qwq](./example/3.png)
+
+```
+> python ./glyph-ascii-canvas.py -f ./MapleMonoNL-Regular.ttf ./example/3.png -a
+                                                                                
+                                    .                                           
+                              .~aI---,,  ,g^"`""k>-                             
+                          ,<" <m=.   ,}"            `@,                         
+                       ~"        ,`"=  ``=             `@.                      
+                    -/                                    \                     
+                  <"                  ,                    `@                   
+                c"                    }                      {-                 
+              .$                     /               ` `@     `h                
+             c}   `                 d     -    .                {@              
+            4`   `  } t   .        d       \   `-                `h             
+           $    `        .}       d         `h   \                 $            
+          $              [       /            `t, `@                $           
+         /              /    [ -"                "@ {@              {Q          
+        d}           : /    /~"                  -=}""VW/\           {L         
+        $            }:~$}"{}@-               -F            .        '$         
+       .}         ] .      "    \                           ]         $         
+       ]L       .~{ ]                                         .,      $L        
+       }      ,`  { {                          c'`">,        @  `h    $L        
+       $      }   } $     ,    ,              [  ..- `       L   {@   $L        
+       }      L   } $       .`t                 $$$8L        L   j    $L        
+       $      {-  { {}     N$${L                $}"`      , ]   d}    $         
+       $       {@. Q \L     }y}        :              ~"    $^M}      $         
+       {L        ``{@ [L~-, `                       ~"     $          $         
+        {.          {@{ L    "-          ,-=       d`    .$           $@        
+         $           {@\ \     `=    .'    }       }    d}            {$        
+          $.            `@`     {    `h,  4        }  4}               $L       
+           {@             `t-   $       ``        ,}N"            @     ""      
+            `Q.               "@-.           .-g$`    `=        .o>}>           
+              {@  .               `"VkmwmpH${}     ]L    \=      -   ``         
+               {L ]         .'  .     `=. ,d"     ~}       {@    `              
+                $.   `    -"    !       .       ,N`                             
+              @$`     ` ~[       "-  ,<P` `>-~a"                                
+                                                                                
+                                                                                
 
 ```
 
-![O](./example/3.png)
-
-```
-> python ./glyph-ascii-canvas.py -f ./MapleMonoNL-Regular.ttf ./example/3.png -w 50 -s 2 -l 2
-                                                      
-                  -~wmmq999mm=--                      
-              ~f"``            ``"b~                  
-            d{                      `3>               
-           /                           `b-            
-         <[                              `h           
-         {                                 \-         
-        /                                   }L        
-        [         dF           <e            }        
-       ]         `             ``             \       
-       ]                                      }       
-     - ]L                                     ]       
-     \                                        [       
-     ]L                                      /        
-      ]L                                    /`        
-       `h             ""````               /          
-         }>                              d[           
-           \>                         -f`             
-             `3>-                  <f`                
-                ``"pw~~-----~=mf"``                   
-                           ][                         
-                           {                          
-                          d[       ~m"``              
-                          { -~mf"``                   
-                 <mmqff"`$[`  \                       
-                         {     }>                     
-                         [       \>                   
-                                   `'                 
-                                                      
-                                                      
-                                                      
-                                                      
-
-```
+#### 4
 
 ![pig](./example/4.png)
 
 ```
-> python ./glyph-ascii-canvas.py -f ./MapleMonoNL-Regular.ttf ./example/4.png -s 1 -l 2
-                                                                                    
-                                                                                    
-                    am     ,#"o                                  <~                 
-                   $  ],  4    $                      ,#"&    -$   L                
-                 ,(    ] $      &                    $    L  $     $                
-                -(      [       ]<~-               <(     L4`      ]                
-      <`-qP"9m,<`                          `````  ,`      $         L,--`"m         
-     $`           ,                               `               ,F`       &       
-    j,-~~,        `                                              <           $      
-    $                                                            ]           ]      
-    `>                                                            @      `@  $      
-       "9qmmF`     ,P         -PPPPP%gqm=--,     $                 ]~     ,]$       
-            L    -$  $      <[                 `  $      ,P$          `$$``  `      
-            ]-,<{     $>-<P                        $, ,<{   ]       ~P`             
-                                                             `Q%P"`                 
-                                                                                    
-
+> python ./glyph-ascii-canvas.py -f ./MapleMonoNL-Regular.ttf ./example/4.png -a
+                                                                                
+                           .,                                                   
+                  ." \   ./  `.                      ,-     .d``@               
+                 :    \ :     {                    ~`  \   /    {               
+                d      W       L                 .[    { ~`     ]               
+      ,  ,---  d                  ````""""""^^  .[     '/        L ""^=.        
+     d"`      ``                                "               -^`  `  `-      
+    d ...        {`                                            /          @     
+    [     `                                                               }     
+    `,                                                         \      "-  }     
+      `">==="      c>        -^^^^^>>=--,..    \                `=     .}[      
+           {    .d  {      <`               ``  \      ~"@         `Y9``  `     
+            \,-/     `>-="                       \,.,g`   L      ~^`            
+                                                           `"""`                
+                                                                                
+                                                                                
 ```
+
+#### 5
 
 ![bear](./example/5.png)
 
 ```
-> python ./glyph-ascii-canvas.py -f ./MapleMonoNL-Regular.ttf ./example/5.png -s 1.5 -l 2
-                                                  <"""n                          
-                                   -=^"``        `      L                        
-               -ar=-  a"`     `  `                      L                        
-             4`     `                                 -`                         
-             \                                         `-                        
-              `                                          l                       
-                                                          \                      
-              ]          m                 ``             ]                      
-              {                                           ]  -r"````y            
-              ]                  ` L                       `          L          
-               \                   [-                                 {          
-         -^``   `             <- -<`]~-=`                            <           
-        (                         [   }                             /            
-       [                          l  -[                           ^`             
-       L                           ``                            ]               
-       \                                                         {               
-        l                                                        ]    a`` [      
-         `>                                                       ]w`  -C        
-           `L                                                      `w"`          
-            ]                                                        `-          
-             L                       -~a^"``````"r=~-                  L         
-             L                 ~r"`                    `"^~            [         
-            ]           /""``                               ``"^^'  -f`          
-            {          /                                         ``              
-            \        <`                                                          
-             `"^wr"`                                                             
-                                                                                 
+> python ./glyph-ascii-canvas.py -f ./MapleMonoNL-Regular.ttf ./example/5.png -a
+                                                    ..                          
+                                      .-=^^"""`  c     \                        
+                       .-^"`"^>- .^`                    L                       
+              <`   `.'                                 d                        
+             {                                        `=                        
+              ^                                         \                       
+                                                         `.                     
+                                           :>             {                     
+              ]          `                                .    ,~==-            
+              {                  ~^P`                     ':"`       \          
+               @                   [                                  }         
+           -=^""L                  }\   ~                             `         
+        -"                     ```}   {                             .`          
+       :                          L   /                           ./            
+       [                          `^<"                           :              
+       \                                                         {              
+        -                                                        {     -^"@     
+         \                                                        L ~`  -"      
+           \                                                       \ -^`        
+            `                                                       `@          
+             L                          .,-====-,                     \         
+             [                   ,='``              ``^=-              [        
+             L          .---<"`                            `^-,..,   ,/         
+            .          .`                                        ^^"            
+            {         c                                                         
+             "=.  .~'                                                           
 
 ```
-
